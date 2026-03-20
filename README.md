@@ -2,6 +2,8 @@
 
 A lightweight, interactive SVG Gantt chart for React. Inspired by [frappe-gantt](https://github.com/frappe/gantt) but built from scratch with modern React, zero UI dependencies, and full dark/light theme support.
 
+![nih-gantt example](example.png)
+
 ## Features
 
 - **Pure SVG rendering** — no canvas, no DOM manipulation, no heavy dependencies
