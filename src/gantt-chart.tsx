@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { addDays, format } from 'date-fns';
 
 import type { GanttTask, ViewMode } from './gantt-types';
 import {
@@ -13,6 +14,8 @@ import {
   getTotalWidth,
   getTodayX,
   dateToX,
+  getPxPerDay,
+  cascadeDependencies,
   getUpperHeaders,
   getLowerHeaders,
   isTodayCell,
@@ -22,6 +25,7 @@ import {
   getArrowPath,
   getTextColor,
   formatDateES,
+  getExpectedProgress,
   type TaskPosition,
 } from './gantt-utils';
 
@@ -62,8 +66,11 @@ export interface GanttChartProps {
   onClick?: (task: GanttTask) => void;
   readonly?: boolean;
   showProgress?: boolean;
+  showExpectedProgress?: boolean;
   dateRange?: { from: Date; to: Date };
   onDateRangeChange?: (range: { from: Date; to: Date }) => void;
+  moveDependencies?: boolean;
+  onDateChange?: (task: GanttTask, newStart: string, newEnd: string, mode: 'resize' | 'move') => void;
   className?: string;
   /** Render a custom toolbar above the chart. Receives scrollToToday callback. */
   renderToolbar?: (ctx: { scrollToToday: () => void }) => React.ReactNode;
@@ -84,8 +91,11 @@ export function GanttChart({
   onClick,
   readonly = true,
   showProgress = false,
+  showExpectedProgress = false,
   dateRange: dateRangeProp,
   onDateRangeChange,
+  moveDependencies = true,
+  onDateChange,
   className,
   renderToolbar,
   theme: themeProp,
@@ -104,6 +114,19 @@ export function GanttChart({
   const [cursorClientX, setCursorClientX] = React.useState(0);
   const [barScreenY, setBarScreenY] = React.useState(0);
   const popupTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Drag state — ref to avoid re-renders during pointermove
+  const dragRef = React.useRef<{
+    taskId: string;
+    mode: 'resize-left' | 'resize-right' | 'move';
+    startClientX: number;
+    originalStart: string;
+    originalEnd: string;
+    originalDurationDays: number;
+    lastDayDelta: number;
+  } | null>(null);
+  const [dragPreview, setDragPreview] = React.useState<Map<string, { x: number; width: number }> | null>(null);
+  const isDragging = !!dragPreview;
 
   React.useEffect(() => { setViewMode(viewModeProp); }, [viewModeProp]);
   React.useEffect(() => { setDateRange(dateRangeProp); }, [dateRangeProp]);
@@ -176,6 +199,116 @@ export function GanttChart({
     }
   }, [todayX]);
 
+  // ── Drag handlers ─────────────────────────────────────────────
+
+  const handleDragStart = React.useCallback((
+    e: React.PointerEvent,
+    task: GanttTask,
+    mode: 'resize-left' | 'resize-right' | 'move',
+  ) => {
+    if (readonly) return;
+    (e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
+    dragRef.current = {
+      taskId: task.id,
+      mode,
+      startClientX: e.clientX,
+      originalStart: task.start,
+      originalEnd: task.end,
+      originalDurationDays: task.durationDays,
+      lastDayDelta: 0,
+    };
+    // Suppress tooltip
+    if (popupTimeout.current) clearTimeout(popupTimeout.current);
+    setPopupTask(null);
+  }, [readonly]);
+
+  const handleDragMove = React.useCallback((e: PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const deltaX = e.clientX - drag.startClientX;
+    const dayDelta = Math.round(deltaX / getPxPerDay(viewMode));
+    if (dayDelta === drag.lastDayDelta) return;
+    drag.lastDayDelta = dayDelta;
+
+    const origStart = new Date(drag.originalStart);
+    const origEnd = new Date(drag.originalEnd);
+    let newStart: Date;
+    let newEnd: Date;
+
+    switch (drag.mode) {
+      case 'resize-left':
+        newStart = addDays(origStart, dayDelta);
+        newEnd = origEnd;
+        if (newStart >= newEnd) newStart = addDays(newEnd, -1);
+        break;
+      case 'resize-right':
+        newStart = origStart;
+        newEnd = addDays(origEnd, dayDelta);
+        if (newEnd <= newStart) newEnd = addDays(newStart, 1);
+        break;
+      case 'move':
+        newStart = addDays(origStart, dayDelta);
+        newEnd = addDays(origEnd, dayDelta);
+        break;
+    }
+
+    const preview = new Map<string, { x: number; width: number }>();
+    const sx = dateToX(newStart, range, viewMode);
+    const ex = dateToX(newEnd, range, viewMode);
+    preview.set(drag.taskId, { x: sx, width: Math.max(ex - sx, 8) });
+
+    if (moveDependencies && drag.mode !== 'move') {
+      const cascade = cascadeDependencies(validTasks, drag.taskId, format(newEnd, 'yyyy-MM-dd'));
+      cascade.forEach((dates, id) => {
+        const cx = dateToX(dates.newStart, range, viewMode);
+        const cxEnd = dateToX(dates.newEnd, range, viewMode);
+        preview.set(id, { x: cx, width: Math.max(cxEnd - cx, 8) });
+      });
+    }
+
+    setDragPreview(preview);
+  }, [viewMode, range, validTasks, moveDependencies]);
+
+  const handleDragEnd = React.useCallback((e: PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    (e.currentTarget as SVGElement)?.releasePointerCapture?.(e.pointerId);
+
+    if (drag.lastDayDelta !== 0 && onDateChange) {
+      const origStart = new Date(drag.originalStart);
+      const origEnd = new Date(drag.originalEnd);
+      let newStart: Date;
+      let newEnd: Date;
+
+      switch (drag.mode) {
+        case 'resize-left':
+          newStart = addDays(origStart, drag.lastDayDelta);
+          newEnd = origEnd;
+          if (newStart >= newEnd) newStart = addDays(newEnd, -1);
+          break;
+        case 'resize-right':
+          newStart = origStart;
+          newEnd = addDays(origEnd, drag.lastDayDelta);
+          if (newEnd <= newStart) newEnd = addDays(newStart, 1);
+          break;
+        case 'move':
+          newStart = addDays(origStart, drag.lastDayDelta);
+          newEnd = addDays(origEnd, drag.lastDayDelta);
+          break;
+      }
+
+      const task = validTasks.find((tk) => tk.id === drag.taskId);
+      if (task) {
+        onDateChange(task, format(newStart, 'yyyy-MM-dd'), format(newEnd, 'yyyy-MM-dd'), drag.mode === 'move' ? 'move' : 'resize');
+      }
+    }
+
+    dragRef.current = null;
+    setDragPreview(null);
+  }, [onDateChange, validTasks]);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -223,31 +356,127 @@ export function GanttChart({
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: t.mutedForeground, fontSize: 14 }}>{emptyText}</div>
           ) : (
             <svg width={totalWidth} height={svgHeight} style={{ display: 'block' }}>
-              <defs><pattern id="gantt-stripe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="white" /></pattern></defs>
+              <defs>
+                <pattern id="gantt-stripe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="2" height="6" fill="white" />
+                </pattern>
+              </defs>
               {weekendRanges.map((wr, i) => <rect key={`we-${wr.x}`} x={wr.x} y={0} width={wr.width} height={svgHeight} fill={t.muted} opacity={0.4} />)}
               {gridLines.map((gl, i) => <line key={`gl-${gl.x}`} x1={gl.x} y1={0} x2={gl.x} y2={svgHeight} stroke={t.border} strokeWidth={0.5} opacity={0.5} />)}
               {todayX !== null && <line x1={todayX} y1={0} x2={todayX} y2={svgHeight} stroke={t.primary} strokeWidth={2} opacity={0.8} />}
               {hoveredRow !== null && <rect x={0} y={hoveredRow * ROW_HEIGHT} width={totalWidth} height={ROW_HEIGHT} fill={t.accent} opacity={0.3} pointerEvents="none" />}
               {taskPositions.flatMap((pos) => (pos.task.dependencies ?? []).map((depId) => { const from = positionByTaskId.get(depId); if (!from) return null; return <path key={`a-${depId}-${pos.task.id}`} d={getArrowPath(from, pos)} fill="none" stroke={t.mutedForeground} strokeWidth={1.5} opacity={0.5} />; }))}
               {taskPositions.map((pos) => {
+                const preview = dragPreview?.get(pos.task.id);
+                const barX = preview?.x ?? pos.x;
+                const barW = preview?.width ?? pos.width;
                 const barColor = pos.task.color ?? '#6366f1';
                 const textColor = getTextColor(barColor);
                 const label = `${pos.task.name} (${pos.task.durationDays}d)`;
                 const approxTextWidth = label.length * 6.5 + 16;
-                const fitsInside = pos.width >= approxTextWidth;
+                const fitsInside = barW >= approxTextWidth;
                 return (
-                  <g key={pos.task.id} style={{ cursor: onClick ? 'pointer' : 'default' }} onClick={() => onClick?.(pos.task)}
-                    onMouseEnter={(e) => { setHoveredRow(pos.row); setHoveredTask(pos.task); setCursorClientX(e.clientX); const s = bodyScrollRef.current; if (s) { setBarScreenY(s.getBoundingClientRect().top + pos.row * ROW_HEIGHT - s.scrollTop); } if (popupTimeout.current) clearTimeout(popupTimeout.current); popupTimeout.current = setTimeout(() => setPopupTask(pos.task), 200); }}
+                  <g
+                    key={pos.task.id}
+                    style={{ cursor: onClick ? 'pointer' : 'default' }}
+                    onClick={() => onClick?.(pos.task)}
+                    onPointerMove={(e) => handleDragMove(e.nativeEvent)}
+                    onPointerUp={(e) => handleDragEnd(e.nativeEvent)}
+                    onMouseEnter={(e) => {
+                      if (isDragging) return;
+                      setHoveredRow(pos.row);
+                      setHoveredTask(pos.task);
+                      setCursorClientX(e.clientX);
+                      const s = bodyScrollRef.current;
+                      if (s) { setBarScreenY(s.getBoundingClientRect().top + pos.row * ROW_HEIGHT - s.scrollTop); }
+                      if (popupTimeout.current) clearTimeout(popupTimeout.current);
+                      popupTimeout.current = setTimeout(() => setPopupTask(pos.task), 200);
+                    }}
                     onMouseMove={(e) => setCursorClientX(e.clientX)}
-                    onMouseLeave={() => { setHoveredRow(null); setHoveredTask(null); if (popupTimeout.current) clearTimeout(popupTimeout.current); setPopupTask(null); }}>
-                    <rect x={pos.x} y={pos.row * ROW_HEIGHT} width={Math.max(pos.width, 60)} height={ROW_HEIGHT} fill="transparent" pointerEvents="all" />
-                    <rect x={pos.x} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET} width={pos.width} height={BAR_HEIGHT} rx={BAR_RADIUS} fill={barColor} opacity={pos.task.completed ? 0.5 : 0.7} />
-                    {showProgress && pos.task.progress > 0 && <rect x={pos.x} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET} width={(pos.width * pos.task.progress) / 100} height={BAR_HEIGHT} rx={BAR_RADIUS} fill={barColor} opacity={1} />}
-                    {pos.task.completed && <rect x={pos.x} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET} width={pos.width} height={BAR_HEIGHT} rx={BAR_RADIUS} fill="url(#gantt-stripe)" opacity={0.4} />}
+                    onMouseLeave={() => {
+                      setHoveredRow(null);
+                      setHoveredTask(null);
+                      if (popupTimeout.current) clearTimeout(popupTimeout.current);
+                      setPopupTask(null);
+                    }}
+                  >
+                    {/* Hit area */}
+                    <rect x={barX} y={pos.row * ROW_HEIGHT} width={Math.max(barW, 60)} height={ROW_HEIGHT} fill="transparent" pointerEvents="all" />
+                    {/* Background */}
+                    <rect
+                      x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
+                      width={barW} height={BAR_HEIGHT}
+                      rx={BAR_RADIUS} ry={BAR_RADIUS}
+                      fill={barColor} opacity={pos.task.completed ? 0.5 : 0.7}
+                      style={{ cursor: !readonly ? (isDragging ? 'grabbing' : 'grab') : (onClick ? 'pointer' : 'default') }}
+                      onPointerDown={(e) => {
+                        if (readonly) return;
+                        e.stopPropagation();
+                        handleDragStart(e, pos.task, 'move');
+                      }}
+                    />
+                    {/* Progress bar with stripe overlay */}
+                    {showProgress && pos.task.progress > 0 && (
+                      <>
+                        <rect
+                          x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
+                          width={(barW * pos.task.progress) / 100}
+                          height={BAR_HEIGHT}
+                          rx={BAR_RADIUS} ry={BAR_RADIUS}
+                          fill={barColor} opacity={0.9}
+                        />
+                        <rect
+                          x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
+                          width={(barW * pos.task.progress) / 100}
+                          height={BAR_HEIGHT}
+                          rx={BAR_RADIUS} ry={BAR_RADIUS}
+                          fill="url(#gantt-stripe)" opacity={0.3}
+                        />
+                      </>
+                    )}
+                    {/* Expected progress line (dashed vertical) */}
+                    {showExpectedProgress && (() => {
+                      const expected = getExpectedProgress(pos.task);
+                      if (expected <= 0 || expected >= 100) return null;
+                      const lineX = barX + (barW * expected) / 100;
+                      const clampedX = Math.max(barX + BAR_RADIUS, Math.min(lineX, barX + barW - BAR_RADIUS));
+                      return (
+                        <line
+                          x1={clampedX} y1={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + 2}
+                          x2={clampedX} y2={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + BAR_HEIGHT - 2}
+                          stroke="rgba(255,255,255,0.4)"
+                          strokeWidth={1.5}
+                          strokeDasharray="3 2"
+                          pointerEvents="none"
+                        />
+                      );
+                    })()}
+                    {/* Label — inside bar if fits, outside (right) if not */}
                     {fitsInside
-                      ? <text x={pos.x + pos.width / 2} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + BAR_HEIGHT / 2 + 4} textAnchor="middle" fontSize={11} fontWeight="500" fill={textColor} style={{ pointerEvents: 'none', userSelect: 'none' }}>{label}</text>
-                      : <text x={pos.x + pos.width + 8} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + BAR_HEIGHT / 2 + 4} textAnchor="start" fontSize={11} fontWeight="500" fill={t.mutedForeground} style={{ pointerEvents: 'none', userSelect: 'none' }}>{label}</text>
+                      ? <text x={barX + barW / 2} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + BAR_HEIGHT / 2 + 4} textAnchor="middle" fontSize={11} fontWeight="500" fill={textColor} style={{ pointerEvents: 'none', userSelect: 'none' }}>{label}</text>
+                      : <text x={barX + barW + 8} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + BAR_HEIGHT / 2 + 4} textAnchor="start" fontSize={11} fontWeight="500" fill={t.mutedForeground} style={{ pointerEvents: 'none', userSelect: 'none' }}>{label}</text>
                     }
+                    {/* Drag handles — only when editable and bar is wide enough */}
+                    {!readonly && barW >= 24 && (
+                      <>
+                        {/* Left handle */}
+                        <rect
+                          x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + 4}
+                          width={8} height={BAR_HEIGHT - 8}
+                          rx={3} fill="rgba(255,255,255,0.001)"
+                          style={{ cursor: 'ew-resize' }}
+                          onPointerDown={(e) => { e.stopPropagation(); handleDragStart(e, pos.task, 'resize-left'); }}
+                        />
+                        {/* Right handle */}
+                        <rect
+                          x={barX + barW - 8} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET + 4}
+                          width={8} height={BAR_HEIGHT - 8}
+                          rx={3} fill="rgba(255,255,255,0.001)"
+                          style={{ cursor: 'ew-resize' }}
+                          onPointerDown={(e) => { e.stopPropagation(); handleDragStart(e, pos.task, 'resize-right'); }}
+                        />
+                      </>
+                    )}
                   </g>
                 );
               })}
@@ -256,8 +485,8 @@ export function GanttChart({
         </div>
       </div>
 
-      {/* Tooltip */}
-      {popupTask && (() => {
+      {/* Tooltip — position:fixed on screen, immune to scroll */}
+      {popupTask && !isDragging && (() => {
         const tooltipW = 220; const tooltipH = 70; const gap = 8;
         const winW = typeof window !== 'undefined' ? window.innerWidth : 1200;
         const showBelow = barScreenY < tooltipH + gap + 20;
@@ -266,13 +495,35 @@ export function GanttChart({
         if (tipX - tooltipW / 2 < 8) tipX = tooltipW / 2 + 8;
         if (tipX + tooltipW / 2 > winW - 8) tipX = winW - tooltipW / 2 - 8;
 
-        const content = renderTooltip ? renderTooltip(popupTask) : (
+        const defaultTooltipContent = (
           <div style={{ background: t.foreground, color: t.background, borderRadius: 6, padding: '6px 12px', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.3)', whiteSpace: 'nowrap' }}>
             <div style={{ fontWeight: 600 }}>{popupTask.name}</div>
             <div style={{ opacity: 0.8, marginTop: 2 }}>{formatDateES(popupTask.start)} - {formatDateES(popupTask.end)}</div>
-            <div style={{ opacity: 0.8 }}>{popupTask.durationDays} {popupTask.durationDays === 1 ? 'dia' : 'dias'}{popupTask.progress > 0 ? ` · ${popupTask.progress}%` : ''}</div>
+            <div style={{ opacity: 0.8 }}>
+              {popupTask.durationDays} {popupTask.durationDays === 1 ? 'dia' : 'dias'}
+              {popupTask.progress > 0 ? ` · ${popupTask.progress}%` : ''}
+            </div>
+            {showExpectedProgress && (() => {
+              const expected = getExpectedProgress(popupTask);
+              if (showProgress && popupTask.progress > 0) {
+                const delta = popupTask.progress - expected;
+                return (
+                  <>
+                    <div style={{ opacity: 0.8 }}>Progreso: {popupTask.progress}% · Esperado: {expected}%</div>
+                    {delta !== 0 && (
+                      <div style={{ color: delta > 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                        {delta > 0 ? '+' : ''}{delta}% {delta > 0 ? 'adelantado' : 'atrasado'}
+                      </div>
+                    )}
+                  </>
+                );
+              }
+              return <div style={{ opacity: 0.8 }}>Plazo transcurrido: {expected}%</div>;
+            })()}
           </div>
         );
+
+        const content = renderTooltip ? renderTooltip(popupTask) : defaultTooltipContent;
         if (content === null) return null;
         return (
           <div style={{ position: 'fixed', zIndex: 9999, left: tipX, top: tipY, transform: showBelow ? 'translateX(-50%)' : 'translate(-50%, -100%)', transition: 'left 50ms ease-out', pointerEvents: 'none' }}>

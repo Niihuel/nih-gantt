@@ -4,7 +4,7 @@ export type { GanttChartProps, GanttTheme } from './gantt-chart';
 export { GanttMini } from './gantt-mini';
 export type { GanttMiniProps } from './gantt-mini';
 
-export { toGanttTask, formatDateES } from './gantt-utils';
+export { toGanttTask, formatDateES, getExpectedProgress, getPxPerDay, cascadeDependencies } from './gantt-utils';
 export type { GanttLineaObra, TimeRange, TaskPosition, HeaderCell, GridLine } from './gantt-utils';
 
 export type { GanttTask, ViewMode } from './gantt-types';

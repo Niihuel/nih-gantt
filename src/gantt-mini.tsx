@@ -9,6 +9,7 @@ export interface GanttMiniProps {
   tasks: GanttTask[];
   height?: number;
   showTooltip?: boolean;
+  showProgress?: boolean;
   className?: string;
   style?: React.CSSProperties;
   /** Label text. Default: "Preview" */
@@ -21,6 +22,7 @@ export function GanttMini({
   tasks,
   height,
   showTooltip = true,
+  showProgress = false,
   className,
   style,
   label = 'Preview',
@@ -72,7 +74,34 @@ export function GanttMini({
                 onMouseEnter={(e) => { if (showTooltip) { setHoveredIndex(index); setTooltipPos({ x: e.clientX, y: e.clientY }); } }}
                 onMouseLeave={() => setHoveredIndex(null)}
               >
+                {/* Background bar */}
                 <rect x={`${leftPct}%`} y={y} width={`${widthPct}%`} height={MINI_BAR_HEIGHT} rx={BAR_RADIUS} fill={barColor} opacity={task.completed ? 0.5 : 0.7} />
+                {/* Progress fill with stripe */}
+                {showProgress && task.progress > 0 && (
+                  <>
+                    <rect
+                      x={`${leftPct}%`}
+                      y={y}
+                      width={`${Math.max(widthPct * task.progress / 100, 0.5)}%`}
+                      height={MINI_BAR_HEIGHT}
+                      rx={BAR_RADIUS}
+                      ry={BAR_RADIUS}
+                      fill={barColor}
+                      opacity={0.9}
+                    />
+                    <rect
+                      x={`${leftPct}%`}
+                      y={y}
+                      width={`${Math.max(widthPct * task.progress / 100, 0.5)}%`}
+                      height={MINI_BAR_HEIGHT}
+                      rx={BAR_RADIUS}
+                      ry={BAR_RADIUS}
+                      fill="url(#gantt-mini-stripe)"
+                      opacity={0.3}
+                    />
+                  </>
+                )}
+                {/* Stripe overlay if completed */}
                 {task.completed && <rect x={`${leftPct}%`} y={y} width={`${widthPct}%`} height={MINI_BAR_HEIGHT} rx={BAR_RADIUS} fill="url(#gantt-mini-stripe)" opacity={0.25} />}
               </g>
             );

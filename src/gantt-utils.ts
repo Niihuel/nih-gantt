@@ -33,7 +33,7 @@ export interface TimeRange {
 }
 
 /** Pixels per day for the given view mode. */
-function pxPerDay(viewMode: ViewMode): number {
+export function getPxPerDay(viewMode: ViewMode): number {
   const colWidth = COLUMN_WIDTHS[viewMode];
   // Day → 1 day/col, Week → 7 days/col, Month → 30 days/col, Year → 30 days/col (quarters of ~91)
   switch (viewMode) {
@@ -110,7 +110,7 @@ export function getTimeRange(
 export function dateToX(date: Date | string, range: TimeRange, viewMode: ViewMode): number {
   const d = typeof date === 'string' ? startOfDay(new Date(date)) : startOfDay(date);
   const dayOffset = differenceInCalendarDays(d, range.start);
-  return dayOffset * pxPerDay(viewMode);
+  return dayOffset * getPxPerDay(viewMode);
 }
 
 /**
@@ -119,7 +119,7 @@ export function dateToX(date: Date | string, range: TimeRange, viewMode: ViewMod
  */
 export function getTotalWidth(range: TimeRange, viewMode: ViewMode): number {
   const totalDays = differenceInCalendarDays(range.end, range.start);
-  const width = totalDays * pxPerDay(viewMode);
+  const width = totalDays * getPxPerDay(viewMode);
   return Math.max(width, 600);
 }
 
@@ -138,7 +138,7 @@ export interface HeaderCell {
  * - Month/Year view → year labels
  */
 export function getUpperHeaders(range: TimeRange, viewMode: ViewMode): HeaderCell[] {
-  const ppd = pxPerDay(viewMode);
+  const ppd = getPxPerDay(viewMode);
   const cells: HeaderCell[] = [];
 
   if (viewMode === 'Day' || viewMode === 'Week') {
@@ -189,7 +189,7 @@ export function getUpperHeaders(range: TimeRange, viewMode: ViewMode): HeaderCel
  * - Year view → "TN" quarters (T1, T2, T3, T4)
  */
 export function getLowerHeaders(range: TimeRange, viewMode: ViewMode): HeaderCell[] {
-  const ppd = pxPerDay(viewMode);
+  const ppd = getPxPerDay(viewMode);
   const cells: HeaderCell[] = [];
 
   switch (viewMode) {
@@ -303,7 +303,7 @@ export interface GridLine {
  * - Year: one line per quarter; thick on year boundaries
  */
 export function getGridLines(range: TimeRange, viewMode: ViewMode): GridLine[] {
-  const ppd = pxPerDay(viewMode);
+  const ppd = getPxPerDay(viewMode);
   const lines: GridLine[] = [];
 
   switch (viewMode) {
@@ -373,7 +373,7 @@ export interface WeekendRange {
 export function getWeekendRanges(range: TimeRange, viewMode: ViewMode): WeekendRange[] {
   if (viewMode !== 'Day') return [];
 
-  const ppd = pxPerDay(viewMode);
+  const ppd = getPxPerDay(viewMode);
   const ranges: WeekendRange[] = [];
   const days = eachDayOfInterval({ start: range.start, end: addDays(range.end, -1) });
 
@@ -561,4 +561,54 @@ export function formatDateES(date: Date | string): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/**
+ * Calculate the expected progress percentage based on today's date.
+ * Returns 0 if today < start, 100 if today > end, proportional otherwise.
+ */
+export function getExpectedProgress(task: GanttTask): number {
+  const today = startOfDay(new Date());
+  const start = startOfDay(new Date(task.start));
+  const end = startOfDay(new Date(task.end));
+
+  if (today <= start) return 0;
+  if (today >= end) return 100;
+
+  const totalDays = differenceInCalendarDays(end, start);
+  if (totalDays <= 0) return 100;
+  const elapsed = differenceInCalendarDays(today, start);
+  return Math.round((elapsed / totalDays) * 100);
+}
+
+/**
+ * Cascade dependency recalculation.
+ * When a task's dates change, shift all dependent tasks to maintain dependency order.
+ * Returns a map of taskId → { newStart, newEnd } for all affected tasks.
+ */
+export function cascadeDependencies(
+  tasks: GanttTask[],
+  changedTaskId: string,
+  newEnd: string,
+): Map<string, { newStart: string; newEnd: string }> {
+  const result = new Map<string, { newStart: string; newEnd: string }>();
+  const endDate = startOfDay(new Date(newEnd));
+
+  const dependents = tasks.filter((t) =>
+    t.dependencies?.includes(changedTaskId),
+  );
+
+  for (const dep of dependents) {
+    const depStart = addDays(endDate, 1);
+    const depEnd = addDays(depStart, dep.durationDays);
+    const newStartStr = format(depStart, 'yyyy-MM-dd');
+    const newEndStr = format(depEnd, 'yyyy-MM-dd');
+
+    result.set(dep.id, { newStart: newStartStr, newEnd: newEndStr });
+
+    const subCascade = cascadeDependencies(tasks, dep.id, newEndStr);
+    subCascade.forEach((val, key) => result.set(key, val));
+  }
+
+  return result;
 }
