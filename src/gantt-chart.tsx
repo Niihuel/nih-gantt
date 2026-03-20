@@ -229,6 +229,10 @@ export function GanttChart({
     if (!drag) return;
 
     const deltaX = e.clientX - drag.startClientX;
+
+    // Only activate drag after 5px threshold (distinguishes click from drag)
+    if (!dragPreview && Math.abs(deltaX) < 5) return;
+
     const dayDelta = Math.round(deltaX / getPxPerDay(viewMode));
     if (dayDelta === drag.lastDayDelta) return;
     drag.lastDayDelta = dayDelta;
@@ -278,7 +282,9 @@ export function GanttChart({
 
     (e.currentTarget as SVGElement)?.releasePointerCapture?.(e.pointerId);
 
-    if (drag.lastDayDelta !== 0 && onDateChange) {
+    const wasDragging = !!dragPreview;
+
+    if (wasDragging && drag.lastDayDelta !== 0 && onDateChange) {
       const origStart = new Date(drag.originalStart);
       const origEnd = new Date(drag.originalEnd);
       let newStart: Date;
@@ -307,12 +313,13 @@ export function GanttChart({
       }
     }
 
-    // Block the click event that fires right after pointerup
-    justDragged.current = true;
-    requestAnimationFrame(() => { justDragged.current = false; });
-
     dragRef.current = null;
     setDragPreview(null);
+
+    if (wasDragging) {
+      justDragged.current = true;
+      requestAnimationFrame(() => { justDragged.current = false; });
+    }
   }, [onDateChange, validTasks]);
 
   // ── Render ───────────────────────────────────────────────────────────────
