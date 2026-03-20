@@ -408,6 +408,9 @@ export function getTaskPositions(
   viewMode: ViewMode,
 ): TaskPosition[] {
   return tasks.map((task, index) => {
+    if (task.isGroupHeader) {
+      return { task, row: index, x: 0, width: 0, y: index * ROW_HEIGHT + BAR_Y_OFFSET };
+    }
     const x = dateToX(task.start, range, viewMode);
     const endX = dateToX(task.end, range, viewMode);
     const rawWidth = endX - x;

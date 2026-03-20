@@ -11,6 +11,9 @@ export interface GanttTask {
   completed?: boolean;
   actualStart?: string;
   actualEnd?: string;
+  isGroupHeader?: boolean;
+  groupLabel?: string;
+  section?: 'commercial' | 'technical';
 }
 
 export type ViewMode = 'Day' | 'Week' | 'Month' | 'Year';

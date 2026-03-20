@@ -127,6 +127,8 @@ export function GanttChart({
   } | null>(null);
   const [dragPreview, setDragPreview] = React.useState<Map<string, { x: number; width: number }> | null>(null);
   const isDragging = !!dragPreview;
+  // Prevent click from firing after a drag (click fires after pointerup)
+  const justDragged = React.useRef(false);
 
   React.useEffect(() => { setViewMode(viewModeProp); }, [viewModeProp]);
   React.useEffect(() => { setDateRange(dateRangeProp); }, [dateRangeProp]);
@@ -169,7 +171,7 @@ export function GanttChart({
   }, [onViewChange]);
 
   // Derived values
-  const validTasks = React.useMemo(() => tasks.filter((t) => t.start && t.end), [tasks]);
+  const validTasks = React.useMemo(() => tasks.filter((t) => (t.start && t.end) || t.isGroupHeader), [tasks]);
   const range = React.useMemo(() => getTimeRange(tasks, viewMode, dateRange), [tasks, viewMode, dateRange]);
   const totalWidth = React.useMemo(() => getTotalWidth(range, viewMode), [range, viewMode]);
   const todayX = React.useMemo(() => getTodayX(range, viewMode), [range, viewMode]);
@@ -305,6 +307,10 @@ export function GanttChart({
       }
     }
 
+    // Block the click event that fires right after pointerup
+    justDragged.current = true;
+    requestAnimationFrame(() => { justDragged.current = false; });
+
     dragRef.current = null;
     setDragPreview(null);
   }, [onDateChange, validTasks]);
@@ -360,13 +366,25 @@ export function GanttChart({
                 <pattern id="gantt-stripe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                   <rect width="2" height="6" fill="white" />
                 </pattern>
+                <pattern id="gantt-stripe-animated" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="4" height="12" fill="white" />
+                  <animateTransform attributeName="patternTransform" type="translate" from="0 0" to="12 0" dur="1s" repeatCount="indefinite" additive="sum" />
+                </pattern>
               </defs>
               {weekendRanges.map((wr, i) => <rect key={`we-${wr.x}`} x={wr.x} y={0} width={wr.width} height={svgHeight} fill={t.muted} opacity={0.4} />)}
               {gridLines.map((gl, i) => <line key={`gl-${gl.x}`} x1={gl.x} y1={0} x2={gl.x} y2={svgHeight} stroke={t.border} strokeWidth={0.5} opacity={0.5} />)}
               {todayX !== null && <line x1={todayX} y1={0} x2={todayX} y2={svgHeight} stroke={t.primary} strokeWidth={2} opacity={0.8} />}
               {hoveredRow !== null && <rect x={0} y={hoveredRow * ROW_HEIGHT} width={totalWidth} height={ROW_HEIGHT} fill={t.accent} opacity={0.3} pointerEvents="none" />}
-              {taskPositions.flatMap((pos) => (pos.task.dependencies ?? []).map((depId) => { const from = positionByTaskId.get(depId); if (!from) return null; return <path key={`a-${depId}-${pos.task.id}`} d={getArrowPath(from, pos)} fill="none" stroke={t.mutedForeground} strokeWidth={1.5} opacity={0.5} />; }))}
+              {taskPositions.flatMap((pos) => { if (pos.task.isGroupHeader) return []; return (pos.task.dependencies ?? []).map((depId) => { const from = positionByTaskId.get(depId); if (!from) return null; return <path key={`a-${depId}-${pos.task.id}`} d={getArrowPath(from, pos)} fill="none" stroke={t.mutedForeground} strokeWidth={1.5} opacity={0.5} />; }); })}
               {taskPositions.map((pos) => {
+                if (pos.task.isGroupHeader) {
+                  return (
+                    <g key={pos.task.id}>
+                      <rect x={0} y={pos.row * ROW_HEIGHT} width={totalWidth} height={ROW_HEIGHT} fill={t.muted} opacity={0.3} />
+                      <text x={16} y={pos.row * ROW_HEIGHT + ROW_HEIGHT / 2 + 4} fontSize={11} fontWeight="600" fill={t.mutedForeground} style={{ pointerEvents: 'none', userSelect: 'none' }}>{pos.task.groupLabel || ''}</text>
+                    </g>
+                  );
+                }
                 const preview = dragPreview?.get(pos.task.id);
                 const barX = preview?.x ?? pos.x;
                 const barW = preview?.width ?? pos.width;
@@ -379,7 +397,7 @@ export function GanttChart({
                   <g
                     key={pos.task.id}
                     style={{ cursor: onClick ? 'pointer' : 'default' }}
-                    onClick={() => onClick?.(pos.task)}
+                    onClick={() => { if (justDragged.current) return; onClick?.(pos.task); }}
                     onPointerMove={(e) => handleDragMove(e.nativeEvent)}
                     onPointerUp={(e) => handleDragEnd(e.nativeEvent)}
                     onMouseEnter={(e) => {
@@ -416,24 +434,36 @@ export function GanttChart({
                       }}
                     />
                     {/* Progress bar with stripe overlay */}
-                    {showProgress && pos.task.progress > 0 && (
-                      <>
-                        <rect
-                          x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
-                          width={(barW * pos.task.progress) / 100}
-                          height={BAR_HEIGHT}
-                          rx={BAR_RADIUS} ry={BAR_RADIUS}
-                          fill={barColor} opacity={0.9}
-                        />
-                        <rect
-                          x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
-                          width={(barW * pos.task.progress) / 100}
-                          height={BAR_HEIGHT}
-                          rx={BAR_RADIUS} ry={BAR_RADIUS}
-                          fill="url(#gantt-stripe)" opacity={0.3}
-                        />
-                      </>
-                    )}
+                    {(() => {
+                      const expected = getExpectedProgress(pos.task);
+                      const realProgress = pos.task.progress > 0 ? pos.task.progress : 0;
+                      const visualProgress = showProgress && realProgress > 0
+                        ? realProgress
+                        : showExpectedProgress && expected > 0 && expected < 100
+                          ? expected
+                          : 0;
+                      if (visualProgress <= 0) return null;
+                      const isInProgress = expected > 0 && expected < 100 && !pos.task.completed;
+                      const stripeId = isInProgress ? 'gantt-stripe-animated' : 'gantt-stripe';
+                      return (
+                        <>
+                          <rect
+                            x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
+                            width={(barW * visualProgress) / 100}
+                            height={BAR_HEIGHT}
+                            rx={BAR_RADIUS} ry={BAR_RADIUS}
+                            fill={barColor} opacity={0.9}
+                          />
+                          <rect
+                            x={barX} y={pos.row * ROW_HEIGHT + BAR_Y_OFFSET}
+                            width={(barW * visualProgress) / 100}
+                            height={BAR_HEIGHT}
+                            rx={BAR_RADIUS} ry={BAR_RADIUS}
+                            fill={`url(#${stripeId})`} opacity={0.3}
+                          />
+                        </>
+                      );
+                    })()}
                     {/* Expected progress line (dashed vertical) */}
                     {showExpectedProgress && (() => {
                       const expected = getExpectedProgress(pos.task);
