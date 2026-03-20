@@ -192,7 +192,7 @@ export function GanttChart({
         <div ref={headerScrollRef} style={{ overflow: 'hidden', flexShrink: 0, borderBottom: `1px solid ${t.border}` }}>
           <svg width={totalWidth} height={HEADER_HEIGHT} style={{ display: 'block' }}>
             {upperHeaders.map((cell, i) => (
-              <g key={`u-${i}`}>
+              <g key={`u-${cell.x}`}>
                 <rect x={cell.x} y={0} width={cell.width} height={HEADER_HEIGHT / 2} fill={t.card} stroke={t.border} strokeWidth={0.5} />
                 <text x={cell.x + cell.width / 2} y={HEADER_HEIGHT / 4 + 4} textAnchor="middle" fontSize={11} fontWeight="600" fill={t.mutedForeground} style={{ textTransform: 'capitalize' }}>{cell.label}</text>
               </g>
@@ -205,7 +205,7 @@ export function GanttChart({
               const pillX = cell.x + (cell.width - pillW) / 2;
               const pillY = HEADER_HEIGHT / 2 + 3;
               return (
-                <g key={`l-${i}`}>
+                <g key={`l-${cell.x}`}>
                   <rect x={cell.x} y={HEADER_HEIGHT / 2} width={cell.width} height={HEADER_HEIGHT / 2} fill={t.card} stroke={t.border} strokeWidth={0.5} />
                   {isToday && <rect x={pillX} y={pillY} width={pillW} height={pillH} rx={pillH / 2} fill={t.foreground} opacity={0.9} />}
                   {isHovered && !isToday && <rect x={pillX} y={pillY} width={pillW} height={pillH} rx={pillH / 2} fill={t.accent} opacity={0.8} />}
@@ -224,8 +224,8 @@ export function GanttChart({
           ) : (
             <svg width={totalWidth} height={svgHeight} style={{ display: 'block' }}>
               <defs><pattern id="gantt-stripe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="white" /></pattern></defs>
-              {weekendRanges.map((wr, i) => <rect key={`we-${i}`} x={wr.x} y={0} width={wr.width} height={svgHeight} fill={t.muted} opacity={0.4} />)}
-              {gridLines.map((gl, i) => <line key={`gl-${i}`} x1={gl.x} y1={0} x2={gl.x} y2={svgHeight} stroke={t.border} strokeWidth={0.5} opacity={0.5} />)}
+              {weekendRanges.map((wr, i) => <rect key={`we-${wr.x}`} x={wr.x} y={0} width={wr.width} height={svgHeight} fill={t.muted} opacity={0.4} />)}
+              {gridLines.map((gl, i) => <line key={`gl-${gl.x}`} x1={gl.x} y1={0} x2={gl.x} y2={svgHeight} stroke={t.border} strokeWidth={0.5} opacity={0.5} />)}
               {todayX !== null && <line x1={todayX} y1={0} x2={todayX} y2={svgHeight} stroke={t.primary} strokeWidth={2} opacity={0.8} />}
               {hoveredRow !== null && <rect x={0} y={hoveredRow * ROW_HEIGHT} width={totalWidth} height={ROW_HEIGHT} fill={t.accent} opacity={0.3} pointerEvents="none" />}
               {taskPositions.flatMap((pos) => (pos.task.dependencies ?? []).map((depId) => { const from = positionByTaskId.get(depId); if (!from) return null; return <path key={`a-${depId}-${pos.task.id}`} d={getArrowPath(from, pos)} fill="none" stroke={t.mutedForeground} strokeWidth={1.5} opacity={0.5} />; }))}
