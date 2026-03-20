@@ -1,6 +1,6 @@
 {
   "name": "nih-gantt",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lightweight SVG Gantt chart for React — frappe-gantt inspired, zero UI dependencies",
   "type": "module",
   "main": "dist/index.js",
