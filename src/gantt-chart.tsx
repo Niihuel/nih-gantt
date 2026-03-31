@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { addDays, format } from 'date-fns';
+import { addDays, format, parseISO } from 'date-fns';
 
 import type { GanttTask, ViewMode } from './gantt-types';
 import {
@@ -26,6 +26,7 @@ import {
   getTextColor,
   formatDateES,
   getExpectedProgress,
+  scheduleNextFrame,
   type TaskPosition,
 } from './gantt-utils';
 
@@ -141,7 +142,7 @@ export function GanttChart({
     const body = bodyScrollRef.current;
     const header = headerScrollRef.current;
     if (!body || !header) return;
-    requestAnimationFrame(() => { header.scrollLeft = body.scrollLeft; });
+    scheduleNextFrame(() => { header.scrollLeft = body.scrollLeft; });
   }, []);
 
   // Ctrl+Scroll zoom
@@ -187,6 +188,8 @@ export function GanttChart({
   React.useEffect(() => {
     const el = bodyScrollRef.current;
     if (!el) return;
+    setContainerHeight(el.clientHeight);
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(([entry]) => setContainerHeight(entry.contentRect.height));
     observer.observe(el);
     return () => observer.disconnect();
@@ -237,8 +240,8 @@ export function GanttChart({
     if (dayDelta === drag.lastDayDelta) return;
     drag.lastDayDelta = dayDelta;
 
-    const origStart = new Date(drag.originalStart);
-    const origEnd = new Date(drag.originalEnd);
+    const origStart = parseISO(drag.originalStart);
+    const origEnd = parseISO(drag.originalEnd);
     let newStart: Date;
     let newEnd: Date;
 
@@ -285,8 +288,8 @@ export function GanttChart({
     const wasDragging = !!dragPreview;
 
     if (wasDragging && drag.lastDayDelta !== 0 && onDateChange) {
-      const origStart = new Date(drag.originalStart);
-      const origEnd = new Date(drag.originalEnd);
+      const origStart = parseISO(drag.originalStart);
+      const origEnd = parseISO(drag.originalEnd);
       let newStart: Date;
       let newEnd: Date;
 
@@ -318,9 +321,14 @@ export function GanttChart({
 
     if (wasDragging) {
       justDragged.current = true;
-      requestAnimationFrame(() => { justDragged.current = false; });
+      scheduleNextFrame(() => { justDragged.current = false; });
     }
   }, [onDateChange, validTasks]);
+
+  const handleDragCancel = React.useCallback(() => {
+    dragRef.current = null;
+    setDragPreview(null);
+  }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -407,6 +415,7 @@ export function GanttChart({
                     onClick={() => { if (justDragged.current) return; onClick?.(pos.task); }}
                     onPointerMove={(e) => handleDragMove(e.nativeEvent)}
                     onPointerUp={(e) => handleDragEnd(e.nativeEvent)}
+                    onPointerCancel={handleDragCancel}
                     onMouseEnter={(e) => {
                       if (isDragging) return;
                       setHoveredRow(pos.row);

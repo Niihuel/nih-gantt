@@ -31,6 +31,20 @@ bun add nih-gantt
 
 **Peer dependencies:** `react >= 18`, `react-dom >= 18`, `date-fns >= 3`
 
+## Compatibility
+
+- **React**: supports React 18 and 19.
+- **Package formats**: ships both **ESM** and **CommonJS** builds. Modern bundlers will use ESM automatically, while older toolchains can consume the CJS entry.
+- **SSR**: safe to import in SSR environments. Browser-only APIs are only used at runtime on the client.
+- **Browsers**: designed for modern browsers with SVG, Pointer Events, `requestAnimationFrame`, and `ResizeObserver`.
+- **Date input**: pass task dates as ISO calendar strings (`YYYY-MM-DD`) for stable parsing across environments.
+
+CommonJS example:
+
+```js
+const { GanttChart } = require('nih-gantt');
+```
+
 ## Quick Start
 
 ```tsx

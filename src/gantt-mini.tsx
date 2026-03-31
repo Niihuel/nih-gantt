@@ -1,7 +1,7 @@
 import * as React from 'react';
 import type { GanttTask } from './gantt-types';
 import { MINI_ROW_HEIGHT, MINI_BAR_HEIGHT, MINI_BAR_Y_OFFSET, BAR_RADIUS } from './gantt-types';
-import { formatDateES } from './gantt-utils';
+import { toTimestamp } from './gantt-utils';
 
 export type { GanttTask };
 
@@ -35,8 +35,8 @@ export function GanttMini({
 
   if (validTasks.length === 0) return null;
 
-  const minTime = Math.min(...validTasks.map((t) => new Date(t.start).getTime()));
-  const maxTime = Math.max(...validTasks.map((t) => new Date(t.end).getTime()));
+  const minTime = Math.min(...validTasks.map((t) => toTimestamp(t.start)));
+  const maxTime = Math.max(...validTasks.map((t) => toTimestamp(t.end)));
   const totalRange = maxTime - minTime;
 
   const computedHeight = height ?? validTasks.length * MINI_ROW_HEIGHT;
@@ -61,8 +61,8 @@ export function GanttMini({
             </pattern>
           </defs>
           {validTasks.map((task, index) => {
-            const taskStart = new Date(task.start).getTime();
-            const taskEnd = new Date(task.end).getTime();
+            const taskStart = toTimestamp(task.start);
+            const taskEnd = toTimestamp(task.end);
             const leftPct = totalRange > 0 ? ((taskStart - minTime) / totalRange) * 100 : 0;
             const widthPct = totalRange > 0 ? Math.max(((taskEnd - taskStart) / totalRange) * 100, 1) : 1;
             const y = index * MINI_ROW_HEIGHT + MINI_BAR_Y_OFFSET;

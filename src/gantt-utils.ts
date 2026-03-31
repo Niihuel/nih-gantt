@@ -14,6 +14,7 @@ import {
   eachDayOfInterval,
   eachWeekOfInterval,
   eachMonthOfInterval,
+  parseISO,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { GanttTask, ViewMode } from './gantt-types';
@@ -30,6 +31,10 @@ import {
 export interface TimeRange {
   start: Date;
   end: Date;
+}
+
+function parseTaskDate(date: Date | string): Date {
+  return typeof date === 'string' ? parseISO(date) : date;
 }
 
 /** Pixels per day for the given view mode. */
@@ -69,8 +74,8 @@ export function getTimeRange(
     return { start: addDays(today, -7), end: addDays(today, 30) };
   }
 
-  const starts = validTasks.map((t) => startOfDay(new Date(t.start))).sort((a, b) => a.getTime() - b.getTime());
-  const ends = validTasks.map((t) => startOfDay(new Date(t.end))).sort((a, b) => b.getTime() - a.getTime());
+  const starts = validTasks.map((t) => startOfDay(parseTaskDate(t.start))).sort((a, b) => a.getTime() - b.getTime());
+  const ends = validTasks.map((t) => startOfDay(parseTaskDate(t.end))).sort((a, b) => b.getTime() - a.getTime());
   const minDate = starts[0];
   const maxDate = ends[0];
 
@@ -108,7 +113,7 @@ export function getTimeRange(
  * Convert a date to an X pixel position relative to range.start.
  */
 export function dateToX(date: Date | string, range: TimeRange, viewMode: ViewMode): number {
-  const d = typeof date === 'string' ? startOfDay(new Date(date)) : startOfDay(date);
+  const d = startOfDay(parseTaskDate(date));
   const dayOffset = differenceInCalendarDays(d, range.start);
   return dayOffset * getPxPerDay(viewMode);
 }
@@ -558,7 +563,7 @@ export function toGanttTask(linea: GanttLineaObra): GanttTask {
  * Format a date in Spanish (es-AR) locale: "5 mar. 2025"
  */
 export function formatDateES(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = parseTaskDate(date);
   return d.toLocaleDateString('es-AR', {
     day: 'numeric',
     month: 'short',
@@ -572,8 +577,8 @@ export function formatDateES(date: Date | string): string {
  */
 export function getExpectedProgress(task: GanttTask): number {
   const today = startOfDay(new Date());
-  const start = startOfDay(new Date(task.start));
-  const end = startOfDay(new Date(task.end));
+  const start = startOfDay(parseTaskDate(task.start));
+  const end = startOfDay(parseTaskDate(task.end));
 
   if (today <= start) return 0;
   if (today >= end) return 100;
@@ -595,7 +600,7 @@ export function cascadeDependencies(
   newEnd: string,
 ): Map<string, { newStart: string; newEnd: string }> {
   const result = new Map<string, { newStart: string; newEnd: string }>();
-  const endDate = startOfDay(new Date(newEnd));
+  const endDate = startOfDay(parseTaskDate(newEnd));
 
   const dependents = tasks.filter((t) =>
     t.dependencies?.includes(changedTaskId),
@@ -614,4 +619,16 @@ export function cascadeDependencies(
   }
 
   return result;
+}
+
+export function toTimestamp(date: Date | string): number {
+  return parseTaskDate(date).getTime();
+}
+
+export function scheduleNextFrame(callback: () => void): void {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(callback);
+    return;
+  }
+  callback();
 }
