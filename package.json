@@ -49,10 +49,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nihuel/nih-gantt"
+    "url": "https://github.com/niihuel/nih-gantt"
   },
-  "homepage": "https://github.com/nihuel/nih-gantt#readme",
+  "homepage": "https://github.com/niihuel/nih-gantt#readme",
   "bugs": {
-    "url": "https://github.com/nihuel/nih-gantt/issues"
+    "url": "https://github.com/niihuel/nih-gantt/issues"
   }
 }
